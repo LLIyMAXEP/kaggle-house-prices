@@ -6,9 +6,10 @@ from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import OneHotEncoder
+from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import KFold
 
 X = pd.read_csv('data/train.csv', index_col='Id')
-test_set = pd.read_csv('data/test.csv', index_col='Id')
 
 X.dropna(axis=0, subset=['SalePrice'], inplace=True)
 y = X.SalePrice
@@ -33,6 +34,9 @@ numerical_cols = ['MSSubClass', 'LotArea', 'OverallQual', 'OverallCond', 'YearBu
 
 null_numerical_cols = ['LotFrontage', 'GarageYrBlt']
 
+# Keep selected columns only
+my_cols = categorical_cols + numerical_cols + null_numerical_cols
+
 # Preprocessing for numerical data
 numerical_transformer = SimpleImputer(strategy='median')
 null_numerical_transformer = SimpleImputer(strategy='constant', fill_value=0)
@@ -51,25 +55,32 @@ preprocessor = ColumnTransformer(
         ('cat', categorical_transformer, categorical_cols)
     ])
 
-# Keep selected columns only
-my_cols = categorical_cols + numerical_cols + null_numerical_cols
-X_test = test_set[my_cols]
-
 X_train_final = preprocessor.fit_transform(X[my_cols])
-X_test_final = preprocessor.transform(X_test)
-X_test_final.index = X_test.index
+# X_valid_final = preprocessor.transform(X_valid[my_cols])
 
 xg_model = XGBRegressor(random_state=1,
                         n_estimators=1000,
                         learning_rate=0.05,
-                        objective='reg:squarederror')
+                        objective='reg:squarederror',
+                        n_jobs=8)
 
-xg_model.fit(X_train_final, y)
+# xg_model.fit(X_train_final,
+#              y_train,
+#              early_stopping_rounds=100,
+#              eval_set=[(X_valid_final, y_valid)],
+#              verbose=False)
 
-prediction = xg_model.predict(X_test_final)
+# prediction = xg_model.predict(X_valid_final)
 
-output = pd.DataFrame({'Id': X_test_final.index,
-                       'SalePrice': prediction})
-output.to_csv('data/submission.csv', index=False)
+kfold = KFold(n_splits=10, random_state=1, shuffle=True)
+
+# Multiply by -1 since sklearn calculates *negative* MAE
+scores = -1 * cross_val_score(xg_model, X_train_final, y,
+                              cv=kfold,
+                              scoring='neg_mean_absolute_error')
+
+print("MAE scores:\n", scores)
+print("MAE scores mean:\n", scores.mean())
+print("MAE scores std:\n", scores.std())
 
 # print(mean_absolute_error(prediction, y_valid))
